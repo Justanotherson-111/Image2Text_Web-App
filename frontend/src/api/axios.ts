@@ -1,85 +1,64 @@
-// frontend/src/api/axios.ts
-import axios from "axios";
-import { getAccessToken, getRefreshToken, saveTokens, clearTokens } from "../utils/auth";
-
-const BASE_URL = "/api";
+import axios, { type AxiosRequestHeaders } from "axios";
+import { getAccessToken, setAccessToken, logout } from "../auth/AuthService";
 
 const api = axios.create({
-  baseURL: BASE_URL,
+  baseURL: "/api",
+  withCredentials: true, // send HttpOnly refresh cookie
 });
 
 let isRefreshing = false;
-let failedQueue: {
-  resolve: (value?: unknown) => void;
-  reject: (reason?: any) => void;
-  config: any;
-}[] = [];
+let failedQueue: { resolve: (value?: any) => void; reject: (error: any) => void }[] = [];
 
 const processQueue = (error: any, token: string | null = null) => {
-  failedQueue.forEach((prom) => {
-    if (error) prom.reject(error);
-    else prom.resolve(token);
+  failedQueue.forEach((p) => {
+    if (error) p.reject(error);
+    else p.resolve(token);
   });
   failedQueue = [];
 };
 
-// 1️⃣ Automatically attach access token
 api.interceptors.request.use((config) => {
   const token = getAccessToken();
-  if (token && config.headers) {
-    config.headers["Authorization"] = `Bearer ${token}`;
+
+  if (!config.headers) config.headers = {} as AxiosRequestHeaders;
+
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
   }
+
   return config;
 });
 
-// 2️⃣ Handle 401 errors with refresh queue
 api.interceptors.response.use(
-  (response) => response,
-  async (error) => {
-    const originalRequest = error.config;
-
-    if (error.response?.status === 401 && !originalRequest._retry) {
-      if (!getRefreshToken()) {
-        clearTokens();
-        window.location.href = "/login";
-        return Promise.reject(error);
-      }
-
+  (res) => res,
+  async (err) => {
+    const originalRequest = err.config;
+    if (err.response?.status === 401 && !originalRequest._retry) {
       if (isRefreshing) {
-        // Queue failed requests while refreshing
         return new Promise((resolve, reject) => {
-          failedQueue.push({ resolve, reject, config: originalRequest });
-        })
-          .then((token) => {
-            originalRequest.headers["Authorization"] = `Bearer ${token}`;
-            return axios(originalRequest);
-          })
-          .catch((err) => Promise.reject(err));
+          failedQueue.push({ resolve, reject });
+        }).then((token) => {
+          originalRequest.headers.Authorization = `Bearer ${token}`;
+          return axios(originalRequest);
+        });
       }
-
       originalRequest._retry = true;
       isRefreshing = true;
-
       try {
-        const { data } = await api.post("/auth/refresh", {
-          refreshToken: getRefreshToken(),
-        });
-
-        saveTokens(data.accessToken, getRefreshToken()!);
+        const { data } = await axios.post("/api/auth/refresh", null, { withCredentials: true });
+        setAccessToken(data.accessToken);
+        api.defaults.headers.common.Authorization = `Bearer ${data.accessToken}`;
         processQueue(null, data.accessToken);
-        originalRequest.headers["Authorization"] = `Bearer ${data.accessToken}`;
-        return axios(originalRequest);
-      } catch (err) {
-        processQueue(err, null);
-        clearTokens();
-        window.location.href = "/login";
-        return Promise.reject(err);
+        return api(originalRequest);
+      } catch (e) {
+        processQueue(e, null);
+        logout();
+        return Promise.reject(e);
       } finally {
         isRefreshing = false;
       }
     }
-
-    return Promise.reject(error);
+    return Promise.reject(err);
   }
 );
 

@@ -1,10 +1,7 @@
-using backend.Models;
+namespace backend.Services.Interfaces;
 
-namespace backend.Services.Interfaces
+public interface IBackgroundTaskQueue
 {
-    public interface IBackgroundTaskQueue
-    {
-        void EnqueueOcrJob(OcrJob job);
-        Task<OcrJob?> DequeueAsync(CancellationToken cancellationToken);
-    }
+    void Enqueue(Func<Task> workItem);
+    Task<Func<Task>> DequeueAsync(CancellationToken cancellationToken);
 }

@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
-using backend.DataBase;
+using backend.Database;
 
 #nullable disable
 
@@ -17,7 +17,7 @@ namespace backend.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "9.0.0")
+                .HasAnnotation("ProductVersion", "9.0.10")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -28,30 +28,26 @@ namespace backend.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
                     b.Property<string>("FileName")
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<string>("OriginalFileName")
+                    b.Property<bool>("OcrProcessed")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Path")
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<string>("RelativePath")
-                        .IsRequired()
-                        .HasColumnType("text");
+                    b.Property<DateTime>("UploadedAt")
+                        .HasColumnType("timestamp with time zone");
 
-                    b.Property<long>("Size")
-                        .HasColumnType("bigint");
-
-                    b.Property<Guid>("UserId")
+                    b.Property<Guid?>("UploadedById")
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UserId");
+                    b.HasIndex("UploadedById");
 
                     b.ToTable("Images");
                 });
@@ -62,18 +58,25 @@ namespace backend.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<bool>("Completed")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid>("ImageId")
                         .HasColumnType("uuid");
 
-                    b.Property<bool>("Processed")
-                        .HasColumnType("boolean");
+                    b.Property<string>("ResultPath")
+                        .HasColumnType("text");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ImageId");
+                    b.HasIndex("ImageId")
+                        .IsUnique();
 
                     b.ToTable("OcrJobs");
                 });
@@ -84,10 +87,10 @@ namespace backend.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<DateTime>("Expires")
+                    b.Property<DateTime>("ExpiresAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<bool>("Revoked")
+                    b.Property<bool>("IsRevoked")
                         .HasColumnType("boolean");
 
                     b.Property<string>("Token")
@@ -113,18 +116,23 @@ namespace backend.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<Guid>("ImageId")
+                    b.Property<Guid?>("CreatedById")
                         .HasColumnType("uuid");
 
-                    b.Property<string>("Language")
+                    b.Property<string>("FileName")
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<string>("TxtFilePath")
+                    b.Property<Guid>("ImageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Path")
                         .IsRequired()
                         .HasColumnType("text");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CreatedById");
 
                     b.HasIndex("ImageId");
 
@@ -139,47 +147,45 @@ namespace backend.Migrations
 
                     b.Property<string>("Email")
                         .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
+                        .HasColumnType("text");
 
                     b.Property<string>("PasswordHash")
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<string>("PasswordSalt")
+                    b.Property<int>("UserRole")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Username")
                         .IsRequired()
                         .HasColumnType("text");
-
-                    b.Property<string>("Role")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("UserName")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("Email")
+                        .IsUnique();
+
+                    b.HasIndex("Username")
+                        .IsUnique();
 
                     b.ToTable("Users");
                 });
 
             modelBuilder.Entity("backend.Models.Image", b =>
                 {
-                    b.HasOne("backend.Models.User", "User")
+                    b.HasOne("backend.Models.User", "UploadedBy")
                         .WithMany("Images")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .HasForeignKey("UploadedById")
+                        .OnDelete(DeleteBehavior.SetNull);
 
-                    b.Navigation("User");
+                    b.Navigation("UploadedBy");
                 });
 
             modelBuilder.Entity("backend.Models.OcrJob", b =>
                 {
                     b.HasOne("backend.Models.Image", "Image")
-                        .WithMany()
-                        .HasForeignKey("ImageId")
+                        .WithOne("OcrJob")
+                        .HasForeignKey("backend.Models.OcrJob", "ImageId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
@@ -199,17 +205,27 @@ namespace backend.Migrations
 
             modelBuilder.Entity("backend.Models.TextFile", b =>
                 {
+                    b.HasOne("backend.Models.User", "CreatedBy")
+                        .WithMany("TextFiles")
+                        .HasForeignKey("CreatedById")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("backend.Models.Image", "Image")
                         .WithMany("TextFiles")
                         .HasForeignKey("ImageId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.Navigation("CreatedBy");
+
                     b.Navigation("Image");
                 });
 
             modelBuilder.Entity("backend.Models.Image", b =>
                 {
+                    b.Navigation("OcrJob")
+                        .IsRequired();
+
                     b.Navigation("TextFiles");
                 });
 
@@ -218,6 +234,8 @@ namespace backend.Migrations
                     b.Navigation("Images");
 
                     b.Navigation("RefreshTokens");
+
+                    b.Navigation("TextFiles");
                 });
 #pragma warning restore 612, 618
         }

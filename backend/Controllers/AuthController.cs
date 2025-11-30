@@ -1,137 +1,174 @@
-using backend.DataBase;
+using System.Security.Claims;
+using backend.Database;
 using backend.DTOs;
 using backend.Models;
 using backend.Services.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Security.Cryptography;
-using System.Text;
 
-namespace backend.Controllers
+namespace backend.Controllers;
+
+[ApiController]
+[Route("api/auth")]
+public class AuthController : ControllerBase
 {
-    [ApiController]
-    [Route("api/[controller]")]
-    public class AuthController : ControllerBase
+    private readonly AppDbContext _db;
+    private readonly IJwtService _jwt;
+    private readonly IConfiguration _config;
+
+    public AuthController(AppDbContext db, IJwtService jwt, IConfiguration config)
     {
-        private readonly AppDbContext _db;
-        private readonly IJwtService _jwt;
+        _db = db;
+        _jwt = jwt;
+        _config = config;
+    }
 
-        public AuthController(AppDbContext db, IJwtService jwt)
+    [HttpPost("register")]
+    public async Task<IActionResult> Register([FromBody] RegisterDto dto)
+    {
+        if (await _db.Users.AnyAsync(u => u.Username == dto.Username || u.Email == dto.Email))
+            return BadRequest("Username or email already in use.");
+
+        var user = new User
         {
-            _db = db;
-            _jwt = jwt;
-        }
+            Username = dto.Username,
+            Email = dto.Email,
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password),
+            UserRole = Role.User
+        };
 
-        // -------------------------------
-        // Registration
-        // -------------------------------
-        [HttpPost("register")]
-        public async Task<IActionResult> Register(RegisterDTO dto)
+        _db.Users.Add(user);
+        await _db.SaveChangesAsync();
+        return Ok(new { message = "User registered successfully." });
+    }
+
+    [HttpPost("login")]
+    public async Task<IActionResult> Login([FromBody] LoginDto dto)
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Username == dto.Username);
+        if (user == null || !BCrypt.Net.BCrypt.Verify(dto.Password, user.PasswordHash))
+            return Unauthorized("Invalid credentials.");
+
+        var accessToken = _jwt.GenerateAccessToken(user);
+        var refreshToken = _jwt.GenerateRefreshToken();
+
+        // Store refresh token in DB only
+        _db.RefreshTokens.Add(new RefreshToken
         {
-            if (await _db.Users.AnyAsync(u => u.Email == dto.Email))
-                return BadRequest(new { message = "Email already exists" });
+            Token = refreshToken,
+            UserId = user.Id,
+            ExpiresAt = DateTime.UtcNow.AddDays(7)
+        });
+        await _db.SaveChangesAsync();
 
-            var salt = GenerateSalt();
-            var user = new User
+        // Set HttpOnly refresh token cookie
+        var cookieOptions = new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = true, // ensure HTTPS, your nginx uses SSL
+            SameSite = SameSiteMode.None, // if frontend is on different origin; otherwise Lax/Strict as appropriate
+            Expires = DateTime.UtcNow.AddDays(7),
+            Path = "/api/auth/refresh" // restrict path
+        };
+        Response.Cookies.Append("refreshToken", refreshToken, cookieOptions);
+
+        var expiresMinutes = double.Parse(_config["Jwt:AccessTokenMinutes"] ?? "60");
+        return Ok(new AuthResponseDto(accessToken, null, DateTime.UtcNow.AddMinutes(expiresMinutes)));
+    }
+
+    [HttpPost("refresh")]
+    public async Task<IActionResult> Refresh()
+    {
+        // read refresh token from cookie
+        if (!Request.Cookies.TryGetValue("refreshToken", out var refreshToken) || string.IsNullOrWhiteSpace(refreshToken))
+            return BadRequest("Refresh token required.");
+
+        var token = await _db.RefreshTokens.Include(r => r.User)
+            .FirstOrDefaultAsync(r => r.Token == refreshToken);
+
+        if (token == null || token.IsRevoked || token.ExpiresAt < DateTime.UtcNow)
+            return Unauthorized("Invalid refresh token.");
+
+        token.IsRevoked = true; // revoke old refresh token
+
+        var newAccess = _jwt.GenerateAccessToken(token.User);
+        var newRefresh = _jwt.GenerateRefreshToken();
+
+        _db.RefreshTokens.Add(new RefreshToken
+        {
+            Token = newRefresh,
+            UserId = token.User.Id,
+            ExpiresAt = DateTime.UtcNow.AddDays(7)
+        });
+
+        // rotate cookie with new refresh token
+        var cookieOptions = new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = true,
+            SameSite = SameSiteMode.None,
+            Expires = DateTime.UtcNow.AddDays(7),
+            Path = "/api/auth/refresh"
+        };
+        Response.Cookies.Delete("refreshToken"); // remove old cookie first
+        Response.Cookies.Append("refreshToken", newRefresh, cookieOptions);
+
+        await _db.SaveChangesAsync();
+
+        var expiresMinutes = double.Parse(_config["Jwt:AccessTokenMinutes"] ?? "60");
+        return Ok(new AuthResponseDto(newAccess, null, DateTime.UtcNow.AddMinutes(expiresMinutes)));
+    }
+
+    [HttpPost("logout")]
+    public async Task<IActionResult> Logout()
+    {
+        // read cookie and revoke corresponding DB refresh token if present
+        if (Request.Cookies.TryGetValue("refreshToken", out var refreshToken) && !string.IsNullOrWhiteSpace(refreshToken))
+        {
+            var token = await _db.RefreshTokens.FirstOrDefaultAsync(r => r.Token == refreshToken);
+            if (token != null)
             {
-                UserName = dto.UserName,
-                Email = dto.Email,
-                Role = "User",
-                PasswordSalt = salt,
-                PasswordHash = HashPassword(dto.Password, salt)
-            };
-
-            _db.Users.Add(user);
-            await _db.SaveChangesAsync();
-
-            var accessToken = _jwt.GenerateAccessToken(user);
-            var refreshToken = _jwt.GenerateRefreshToken(user);
-
-            _db.RefreshTokens.Add(refreshToken);
-            await _db.SaveChangesAsync();
-
-            return Ok(new
-            {
-                accessToken = accessToken,
-                refreshToken = refreshToken.Token
-            });
+                token.IsRevoked = true;
+                _db.RefreshTokens.Update(token);
+                await _db.SaveChangesAsync();
+            }
         }
 
-        // -------------------------------
-        // Login
-        // -------------------------------
-        [HttpPost("login")]
-        public async Task<IActionResult> Login(LoginDTO dto)
+        // delete cookie on client
+        Response.Cookies.Delete("refreshToken", new CookieOptions
         {
-            var user = await _db.Users
-                .Include(u => u.RefreshTokens)
-                .FirstOrDefaultAsync(u => u.Email == dto.Email);
+            HttpOnly = true,
+            Secure = true,
+            SameSite = SameSiteMode.None,
+            Path = "/api/auth/refresh"
+        });
 
-            if (user == null || HashPassword(dto.Password, user.PasswordSalt) != user.PasswordHash)
-                return Unauthorized(new { message = "Invalid credentials" });
+        return Ok();
+    }
+    [HttpGet("me")]
+    [Authorize]
+    public async Task<IActionResult> Me()
+    {
+        // Extract user ID from JWT claims
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (userIdClaim == null) return Unauthorized();
 
-            // Revoke old tokens
-            foreach (var t in user.RefreshTokens.Where(t => !t.Revoked && t.Expires > DateTime.UtcNow))
-                t.Revoked = true;
+        if (!Guid.TryParse(userIdClaim, out var userId))
+            return Unauthorized();
 
-            var accessToken = _jwt.GenerateAccessToken(user);
-            var refreshToken = _jwt.GenerateRefreshToken(user);
+        var user = await _db.Users
+            .AsNoTracking()
+            .FirstOrDefaultAsync(u => u.Id == userId);
 
-            _db.RefreshTokens.Add(refreshToken);
-            await _db.SaveChangesAsync();
+        if (user == null) return Unauthorized();
 
-            return Ok(new
-            {
-                accessToken = accessToken,
-                refreshToken = refreshToken.Token
-            });
-        }
-
-        // -------------------------------
-        // Refresh token
-        // -------------------------------
-        [HttpPost("refresh")]
-        public async Task<IActionResult> Refresh(RefreshDTO dto)
+        return Ok(new
         {
-            var token = await _db.RefreshTokens
-                .Include(r => r.User)
-                .FirstOrDefaultAsync(r => r.Token == dto.RefreshToken);
-
-            if (token == null || token.Revoked || token.Expires < DateTime.UtcNow)
-                return Unauthorized(new { message = "Invalid or expired refresh token" });
-
-            // Revoke used token
-            token.Revoked = true;
-
-            var newAccess = _jwt.GenerateAccessToken(token.User!);
-            var newRefresh = _jwt.GenerateRefreshToken(token.User!);
-
-            _db.RefreshTokens.Add(newRefresh);
-            await _db.SaveChangesAsync();
-
-            return Ok(new
-            {
-                accessToken = newAccess,
-                refreshToken = newRefresh.Token
-            });
-        }
-
-        // -------------------------------
-        // Utilities: Password Hashing
-        // -------------------------------
-        public static string GenerateSalt()
-        {
-            var bytes = new byte[16];
-            using var rng = RandomNumberGenerator.Create();
-            rng.GetBytes(bytes);
-            return Convert.ToBase64String(bytes);
-        }
-
-        public static string HashPassword(string password, string salt)
-        {
-            using var sha = SHA256.Create();
-            var combined = Encoding.UTF8.GetBytes(password + salt);
-            return Convert.ToBase64String(sha.ComputeHash(combined));
-        }
+            user.Id,
+            user.Username,
+            user.Email,
+            Role = user.UserRole.ToString()
+        });
     }
 }

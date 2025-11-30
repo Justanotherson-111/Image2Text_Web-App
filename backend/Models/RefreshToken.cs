@@ -1,25 +1,19 @@
-using System.ComponentModel.DataAnnotations;
-
 namespace backend.Models
 {
     public class RefreshToken
     {
-        [Key]
         public Guid Id { get; set; } = Guid.NewGuid();
 
-        [Required]
-        public string Token { get; set; } = string.Empty;
+        public string Token { get; set; } = null!;
 
-        [Required]
-        public DateTime Expires { get; set; }
+        public DateTime ExpiresAt { get; set; }
 
-        [Required]
-        public bool Revoked { get; set; } = false;
+        public bool IsRevoked { get; set; } = false;
 
-        // Foreign key & navigation
-        [Required]
+        // Foreign key
         public Guid UserId { get; set; }
 
-        public User? User { get; set; }
+        // Navigation
+        public User User { get; set; } = null!;
     }
 }

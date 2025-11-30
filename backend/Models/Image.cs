@@ -4,29 +4,17 @@ namespace backend.Models
 {
     public class Image
     {
-        [Key]
+
         public Guid Id { get; set; } = Guid.NewGuid();
-
         [Required]
-        public string FileName { get; set; } = string.Empty; // stored file
-
+        public string FileName { get; set; }
         [Required]
-        public string OriginalFileName { get; set; } = string.Empty; // uploaded name
-
-        [Required]
-        public long Size { get; set; }
-
-        [Required]
-        public string RelativePath { get; set; } = string.Empty; // path under Uploads/<username>/
-
-        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-
-        // Foreign key & navigation
-        [Required]
-        public Guid UserId { get; set; }
-        public User? User { get; set; }
-
-        // Navigation property for related TextFiles
-        public ICollection<TextFile> TextFiles { get; set; } = new List<TextFile>();
+        public string Path { get; set; }
+        public Guid? UploadedById { get; set; }
+        public User UploadedBy { get; set; }
+        public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
+        public bool OcrProcessed { get; set; } = false;
+        public OcrJob OcrJob { get; set; }
+        public List<TextFile> TextFiles { get; set; } = new();
     }
 }

@@ -4,20 +4,15 @@ namespace backend.Models
 {
     public class TextFile
     {
-        [Key]
         public Guid Id { get; set; } = Guid.NewGuid();
-
-        [Required, MaxLength(10)]
-        public string Language { get; set; } = "eng";
-
         [Required]
-        public string TxtFilePath { get; set; } = string.Empty; // ExtractedText/<username>/
-
-        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-
-        // Foreign key & navigation
+        public string FileName { get; set; }
         [Required]
+        public string Path { get; set; }
         public Guid ImageId { get; set; }
-        public Image? Image { get; set; }
+        public Image Image { get; set; }
+        public Guid? CreatedById { get; set; }
+        public User CreatedBy { get; set; }
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
 }

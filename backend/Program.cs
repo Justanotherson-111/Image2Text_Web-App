@@ -1,154 +1,152 @@
-using backend.DataBase;
-using backend.Services.ServiceDef;
-using backend.Services.Interfaces;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens;
-using Serilog;
-using System.Text;
-using Microsoft.Extensions.Options;
-using backend.DTOs;
-using Microsoft.OpenApi.Models;
 using backend.Models;
-using backend.Controllers;
-using System.IdentityModel.Tokens.Jwt;
+using backend.Database;
+using backend.Services.Interfaces;
+using backend.Services.ServiceDef;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
 using System.Security.Claims;
+using Microsoft.EntityFrameworkCore;
+using System.IdentityModel.Tokens.Jwt;
+using Microsoft.AspNetCore.DataProtection;
+using backend.Hubs;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ------------------------------
-// Configure Logging
-// ------------------------------
-builder.Host.UseSerilog((context, services, configuration) =>
+// ======================= DATA PROTECTION =======================
+builder.Services.AddDataProtection()
+    .PersistKeysToFileSystem(new DirectoryInfo("/app/keys"))
+    .SetApplicationName("MyProject");
+
+// ========================= DATABASE ==========================
+builder.Services.AddDbContext<AppDbContext>(opts =>
 {
-    configuration
-        .WriteTo.Console()
-        .WriteTo.File("logs/log-.txt", rollingInterval: RollingInterval.Day);
+    opts.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection"));
 });
 
-// ------------------------------
-// Add DbContext
-// ------------------------------
-builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection"))
-);
+// ========================= CONTROLLERS =======================
+builder.Services.AddControllers();
 
-// ------------------------------
-// Configure JWT Authentication
-// ------------------------------
-var jwtSettings = builder.Configuration.GetSection("Jwt");
-var key = Encoding.ASCII.GetBytes(jwtSettings["Key"]);
+// ========================= SWAGGER ===========================
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
 
+// ========================= SERVICES ==========================
+builder.Services.AddScoped<IImageService, ImageService>();
+builder.Services.AddScoped<IJwtService, JwtService>();
+builder.Services.AddScoped<IRateLimiterService, RateLimiterService>();
+builder.Services.AddScoped<ITesseractOcrService, TesseractOcrService>();
+builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
+builder.Services.AddHostedService<OCRBackgroundService>();
+
+// ========================= CORS =============================
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowLocalhost", policy =>
+    {
+        policy.WithOrigins(
+                "http://localhost:5173",
+                "http://localhost:3000",
+                "https://localhost"
+            )
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();
+    });
+});
+
+// ========================= AUTHENTICATION =====================
 builder.Services.AddAuthentication(options =>
 {
-    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultAuthenticateScheme = "Bearer";
+    options.DefaultChallengeScheme = "Bearer";
 })
-.AddJwtBearer(options =>
+.AddJwtBearer("Bearer", options =>
 {
-    options.SaveToken = true;
     options.TokenValidationParameters = new TokenValidationParameters
     {
         ValidateIssuer = true,
         ValidateAudience = true,
         ValidateLifetime = true,
         ValidateIssuerSigningKey = true,
-        ValidIssuer = jwtSettings["Issuer"],
-        ValidAudience = jwtSettings["Audience"],
-        IssuerSigningKey = new SymmetricSecurityKey(key),
-
-        // map claim types (important so [Authorize(Roles="Admin")] works)
+        ValidIssuer = builder.Configuration["Jwt:Issuer"],
+        ValidAudience = builder.Configuration["Jwt:Audience"],
+        IssuerSigningKey = new SymmetricSecurityKey(
+            Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!)
+        ),
+        ClockSkew = TimeSpan.Zero,
         NameClaimType = JwtRegisteredClaimNames.Sub,
         RoleClaimType = ClaimTypes.Role
     };
-
-    // optional: helpful for debugging
-    options.Events = new JwtBearerEvents
-    {
-        OnAuthenticationFailed = ctx =>
-        {
-            var logger = ctx.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
-            logger.LogWarning("JWT auth failed: {0}", ctx.Exception.Message);
-            return Task.CompletedTask;
-        }
-    };
 });
+// =========================== REAL TIME =======================
+builder.Services.AddSignalR();
 
-// ------------------------------
-// Configure Services
-// ------------------------------
-builder.Services.AddScoped<IJwtService, JwtService>();
-builder.Services.AddScoped<IImageService, ImageService>();
-builder.Services.AddScoped<ITesseractOcrService, TesseractOcrService>();
-builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
-builder.Services.AddHostedService<OcrBackgroundService>();
-
-builder.Services.Configure<UploadSettings>(builder.Configuration.GetSection("UploadSettings"));
-builder.Services.Configure<TesseractSettings>(builder.Configuration.GetSection("Tesseract"));
-
-// ------------------------------
-// Controllers + Swagger
-// ------------------------------
-builder.Services.AddControllers().AddJsonOptions(opts =>
-{
-    opts.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
-});
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
-
-// ------------------------------
-// Build app
-// ------------------------------
+// ========================= BUILD APP ==========================
 var app = builder.Build();
 
-// ------------------------------
-// Ensure Upload/Text folders exist
-// ------------------------------
-var uploadSettings = app.Services.GetRequiredService<IOptions<UploadSettings>>().Value;
-Directory.CreateDirectory(uploadSettings.ImageFolder);
-Directory.CreateDirectory(uploadSettings.TextFolder);
-
-// ------------------------------
-// Auto-create admin if none exists
-// ------------------------------
+// ========================= MIGRATION & SEED ===================
 using (var scope = app.Services.CreateScope())
 {
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    var adminExists = await db.Users.AnyAsync(u => u.Role == "Admin");
-
-    if (!adminExists)
+    var services = scope.ServiceProvider;
+    var db = services.GetRequiredService<AppDbContext>();
+    try
     {
-        var salt = AuthController.GenerateSalt();
-        var admin = new User
-        {
-            Id = Guid.NewGuid(),
-            UserName = "admin",
-            Email = "admin@example.com",
-            Role = "Admin",
-            PasswordSalt = salt,
-            PasswordHash = AuthController.HashPassword("Admin123!", salt)
-        };
-
-        db.Users.Add(admin);
-        await db.SaveChangesAsync();
-        Log.Information("Admin user created: admin@example.com / Admin123!");
+        db.Database.Migrate();
+        await SeedAdminAsync(services);
+    }
+    catch (Exception ex)
+    {
+        var logger = services.GetRequiredService<ILogger<Program>>();
+        logger.LogError(ex, "Migration/seeding failed.");
     }
 }
 
-
-// ------------------------------
-// Middleware
-// ------------------------------
+// ========================= MIDDLEWARE ==========================
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
 
-//app.UseHttpsRedirection();
+// Needed when behind Docker / reverse proxy
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+});
+
+app.UseCors("AllowLocalhost");
+app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
-
+app.MapHub<OcrHub>("/api/hubs/ocr");
 app.Run();
+
+// ========================= ADMIN SEED ==========================
+static async Task SeedAdminAsync(IServiceProvider services)
+{
+    using var scope = services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+    if (!await db.Users.AnyAsync(u => u.UserRole == Role.Admin))
+    {
+        var adminPass = Environment.GetEnvironmentVariable("ADMIN_PASSWORD") ?? "Admin123!";
+        var hashed = BCrypt.Net.BCrypt.HashPassword(adminPass);
+
+        var admin = new User
+        {
+            Username = "admin",
+            Email = "admin@example.com",
+            PasswordHash = hashed,
+            UserRole = Role.Admin
+        };
+
+        db.Users.Add(admin);
+        await db.SaveChangesAsync();
+
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+        logger.LogInformation("Default admin created: admin@example.com / {Password}", adminPass);
+    }
+}

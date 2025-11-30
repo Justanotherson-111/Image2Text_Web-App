@@ -1,60 +1,75 @@
 services:
   postgres:
+    container_name: project-postgres
     image: postgres:16
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: son
+      POSTGRES_PASSWORD: conkhivang2004
+      POSTGRES_DB: seminar_project_db
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U son -d seminar_project_db"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+    restart: unless-stopped
     networks:
       - app_net
-  backend-sdk:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.sdk
-    working_dir: /app
-    volumes:
-      - ./backend:/app
-    depends_on:
-      - postgres
-    networks:
-      - app_net
+
   backend:
+    container_name: project-backend
+    user: "1000:1000"
     build:
       context: ./backend
       dockerfile: Dockerfile
-    #env_file: ./backend/.env
-    environment:
-      ASPNETCORE_ENVIRONMENT: Production
-      # explicitly pass JWT and DB variables
     depends_on:
       postgres:
         condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=seminar_project_db;Username=son;Password=conkhivang2004
+      TESSDATA_PREFIX: /usr/share/tesseract-ocr/5/tessdata
+      ADMIN_PASSWORD: Admin123!
+      Jwt__Issuer: ImageToText
+      Jwt__Audience: backend
+      Jwt__Key: supersecretkey12345supersecretkey12345
+      Jwt__AccessTokenMinutes: "60"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./backend/Uploads:/app/Uploads
+      - ./backend/ExtractedText:/app/ExtractedText
+      - ./backend/tessdata:/usr/share/tesseract-ocr/5/tessdata
+      - dp_keys:/home/appuser/.aspnet/DataProtection-Keys
     restart: on-failure
-    expose:
-      - "8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 10s
+      retries: 5
+      timeout: 5s
     networks:
       - app_net
 
   frontend:
+    container_name: project-frontend
     build:
       context: ./frontend
-      dockerfile: Dockerfile
-    depends_on:
-      - backend
     ports:
       - "80:80"
+      - "443:443"
+    environment:
+      VITE_API_URL: /api
+    volumes:
+      - ./frontend/certs:/etc/nginx/certs:ro
+      - ./frontend/default.conf:/etc/nginx/conf.d/default.conf:ro
     networks:
       - app_net
 
 volumes:
   postgres_data:
+  dp_keys:
 
 networks:
   app_net:

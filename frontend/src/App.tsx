@@ -1,106 +1,46 @@
-import React from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import ProtectedRoute from "./components/ProtectedRoute";
+import { Routes, Route, Navigate } from "react-router-dom";
+import { useAuth } from "./auth/AuthContext";
+import ProtectedRoute from "./auth/ProtectedRoute";
+import Layout from "./components/Layout/Layout";
 
-import Dashboard from "./pages/Dashboard";
-import Image from "./pages/Image";
-import ExtractedText from "./pages/ExtractedText";
-import AdminPanel from "./pages/AdminPanel";
-import Profile from "./pages/Profile";
-import Login from "./pages/Login";
-import Register from "./pages/Register";
+// Pages
+import Login from "./pages/Auth/Login";
+import Register from "./pages/Auth/Register";
+import Dashboard from "./pages/Dashboard/Dashboard";
+import Profile from "./pages/Profile/Profile";
+import AdminPanel from "./pages/Admin/AdminPanel";
 import NotFound from "./pages/NotFound";
-import Layout from "./components/Layout";
-import ToastContainer from "./components/Toast";
-import useToast from "./utils/useToast";
+import ImageUpload from "./pages/Dashboard/ImageUpload";
+import ExtractedText from "./pages/Dashboard/ExtractedText";
 
-const App: React.FC = () => {
-  const toast = useToast();
+export default function App() {
+  const { user } = useAuth();
 
   return (
-    <BrowserRouter>
-      {/* Toast Notifications */}
-      {toast.toasts.length > 0 && (
-        <ToastContainer toasts={toast.toasts} onRemove={toast.remove} />
-      )}
+    <Routes>
+      {/* Auth routes */}
+      <Route path="/" element={!user ? <Login /> : <Navigate to="/dashboard" />} />
+      <Route path="/register" element={!user ? <Register /> : <Navigate to="/dashboard" />} />
 
-      <Routes>
-        {/* Root redirect */}
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+      {/* Protected routes */}
+      <Route element={<ProtectedRoute />}>
+        <Route element={<Layout />}>
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/profile" element={<Profile />} />
+          <Route path="/image-upload" element={<ImageUpload />} />
+          <Route path="/extracted-text" element={<ExtractedText/>} />
+        </Route>
+      </Route>
 
-        {/* Public pages */}
-        <Route path="/login" element={<Login showToast={toast.showToast} />} />
-        <Route path="/register" element={<Register showToast={toast.showToast} />} />
+      {/* Admin routes */}
+      <Route element={<ProtectedRoute roles={["Admin"]} />}>
+        <Route element={<Layout />}>
+          <Route path="/admin" element={<AdminPanel />} />
+        </Route>
+      </Route>
 
-        {/* Protected pages */}
-        <Route
-          path="/dashboard"
-          element={
-            <ProtectedRoute>
-              <Layout>
-                <Dashboard />
-              </Layout>
-            </ProtectedRoute>
-          }
-        />
-
-        <Route
-          path="/upload"
-          element={
-            <ProtectedRoute>
-              <Layout>
-                <Image />
-              </Layout>
-            </ProtectedRoute>
-          }
-        />
-
-        <Route
-          path="/files"
-          element={
-            <ProtectedRoute>
-              <Layout>
-                <ExtractedText />
-              </Layout>
-            </ProtectedRoute>
-          }
-        />
-
-        <Route
-          path="/profile"
-          element={
-            <ProtectedRoute>
-              <Layout>
-                <Profile />
-              </Layout>
-            </ProtectedRoute>
-          }
-        />
-
-        {/* Admin-only page */}
-        <Route
-          path="/admin"
-          element={
-            <ProtectedRoute requiredRole="Admin">
-              <Layout>
-                <AdminPanel />
-              </Layout>
-            </ProtectedRoute>
-          }
-        />
-
-        {/* 404 Page */}
-        <Route
-          path="*"
-          element={
-            <Layout>
-              <NotFound />
-            </Layout>
-          }
-        />
-      </Routes>
-    </BrowserRouter>
+      {/* fallback */}
+      <Route path="*" element={<NotFound />} />
+    </Routes>
   );
-};
-
-export default App;
+}

@@ -2,28 +2,19 @@ using System.ComponentModel.DataAnnotations;
 
 namespace backend.Models
 {
+    public enum Role { User, Admin }
     public class User
     {
-        [Key]
         public Guid Id { get; set; } = Guid.NewGuid();
-
-        [Required, MaxLength(50)]
-        public string UserName { get; set; } = string.Empty;
-
-        [Required, MaxLength(100)]
-        public string Email { get; set; } = string.Empty;
-
-        [Required]
-        public string PasswordHash { get; set; } = string.Empty;
-
-        [Required]
-        public string PasswordSalt { get; set; } = string.Empty;
-
-        [Required, MaxLength(20)]
-        public string Role { get; set; } = "User";
-
-        // Navigation properties
-        public ICollection<Image> Images { get; set; } = new List<Image>();
-        public ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
+        [Required] 
+        public string Username { get; set; }
+        [Required] 
+        public string PasswordHash { get; set; }
+        [Required] 
+        public string Email { get; set; }
+        public Role UserRole { get; set; } = Role.User;
+        public List<RefreshToken> RefreshTokens { get; set; } = new();
+        public List<Image> Images { get; set; } = new();
+        public List<TextFile> TextFiles { get; set; } = new();
     }
 }
