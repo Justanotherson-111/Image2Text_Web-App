@@ -3,13 +3,13 @@ services:
     container_name: project-postgres
     image: postgres:16
     environment:
-      POSTGRES_USER: son
-      POSTGRES_PASSWORD: conkhivang2004
-      POSTGRES_DB: seminar_project_db
+      POSTGRES_USER: {}
+      POSTGRES_PASSWORD: {}
+      POSTGRES_DB: {}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U son -d seminar_project_db"]
+      test: ["CMD-SHELL", "pg_isready -U {} -d {}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -29,7 +29,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=seminar_project_db;Username=son;Password=conkhivang2004
+      ConnectionStrings__DefaultConnection: Host=postgres;Port={};Database={};Username={};Password={}
       TESSDATA_PREFIX: /usr/share/tesseract-ocr/5/tessdata
       ADMIN_PASSWORD: Admin123!
       Jwt__Issuer: ImageToText
