@@ -11,6 +11,8 @@ namespace backend.Database
         public DbSet<TextFile> TextFiles { get; set; }
         public DbSet<OcrJob> OcrJobs { get; set; }
         public DbSet<RefreshToken> RefreshTokens { get; set; }
+        public DbSet<Document> Documents { get; set; }
+        public DbSet<DocumentSection> DocumentSections { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<User>()
@@ -49,6 +51,18 @@ namespace backend.Database
             .WithMany(u => u.TextFiles)
             .HasForeignKey(t => t.CreatedById)
             .OnDelete(DeleteBehavior.SetNull);
+
+            modelBuilder.Entity<Document>()
+            .HasMany(d => d.Sections)
+            .WithOne(s => s.Document)
+            .HasForeignKey(s => s.DocumentId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<DocumentSection>()
+            .HasMany(s => s.Images)
+            .WithOne(i => i.Section)
+            .HasForeignKey(i => i.SectionId)
+            .OnDelete(DeleteBehavior.Cascade);
 
             base.OnModelCreating(modelBuilder);
         }

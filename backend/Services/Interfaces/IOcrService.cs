@@ -1,7 +1,8 @@
-namespace backend.Services.Interfaces
+namespace backend.Services.Interfaces;
+
+public interface IOcrService
 {
-    public interface IOcrService
-    {
-        Task<string> ExtractTextAsync(string imagePath);
-    }
+    Task<string> ExtractTextAsync(string imagePath, string? language);
+    Task<string> ExtractTextToFileAsync(string imagePath, string outputFile, string? language);
 }
+

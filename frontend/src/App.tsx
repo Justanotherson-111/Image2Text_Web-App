@@ -1,7 +1,6 @@
-import { Routes, Route, Navigate } from "react-router-dom";
-import { useAuth } from "./auth/AuthContext";
+import { Routes, Route } from "react-router-dom";
 import ProtectedRoute from "./auth/ProtectedRoute";
-import Layout from "./components/Layout/Layout";
+import Layout from "./components/Layout/AppLayout";
 
 // Pages
 import Login from "./pages/Auth/Login";
@@ -14,32 +13,27 @@ import ImageUpload from "./pages/Dashboard/ImageUpload";
 import ExtractedText from "./pages/Dashboard/ExtractedText";
 
 export default function App() {
-  const { user } = useAuth();
-
   return (
     <Routes>
-      {/* Auth routes */}
-      <Route path="/" element={!user ? <Login /> : <Navigate to="/dashboard" />} />
-      <Route path="/register" element={!user ? <Register /> : <Navigate to="/dashboard" />} />
+      {/* Public */}
+      <Route path="/" element={<Login />} />
+      <Route path="/register" element={<Register />} />
 
-      {/* Protected routes */}
+      {/* Protected */}
       <Route element={<ProtectedRoute />}>
         <Route element={<Layout />}>
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/profile" element={<Profile />} />
-          <Route path="/image-upload" element={<ImageUpload />} />
-          <Route path="/extracted-text" element={<ExtractedText/>} />
+          <Route path="dashboard" element={<Dashboard />} />
+          <Route path="profile" element={<Profile />} />
+          <Route path="image-upload" element={<ImageUpload />} />
+          <Route path="extracted-text" element={<ExtractedText />} />
+
+          {/* Admin */}
+          <Route element={<ProtectedRoute roles={["Admin"]} />}>
+            <Route path="admin" element={<AdminPanel />} />
+          </Route>
         </Route>
       </Route>
 
-      {/* Admin routes */}
-      <Route element={<ProtectedRoute roles={["Admin"]} />}>
-        <Route element={<Layout />}>
-          <Route path="/admin" element={<AdminPanel />} />
-        </Route>
-      </Route>
-
-      {/* fallback */}
       <Route path="*" element={<NotFound />} />
     </Routes>
   );

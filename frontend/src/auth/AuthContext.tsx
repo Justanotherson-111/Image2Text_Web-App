@@ -1,5 +1,17 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useCallback,
+  type ReactNode,
+} from "react";
 import api from "../api/axios";
+import {
+  setAccessToken,
+  getAccessToken,
+  clearAccessToken,
+} from "./AuthService";
 
 interface User {
   username: string;
@@ -10,88 +22,63 @@ interface User {
 interface AuthContextProps {
   user: User | null;
   isLoading: boolean;
-  hasValidToken: boolean;
-  login: (username: string, password: string) => Promise<void>;
+  login: (u: string, p: string) => Promise<void>;
   logout: () => void;
-  checkAuth: () => Promise<void>;
-  validateToken: () => Promise<boolean>;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextProps | undefined>(undefined);
 
-const ACCESS_TOKEN_KEY = "accessToken";
-
-export const getAccessToken = () => localStorage.getItem(ACCESS_TOKEN_KEY);
-export const setAccessToken = (token: string) => localStorage.setItem(ACCESS_TOKEN_KEY, token);
-export const removeAccessToken = () => localStorage.removeItem(ACCESS_TOKEN_KEY);
-
-export const logout = () => {
-  removeAccessToken();
-  localStorage.setItem("logout", Date.now().toString()); // notify other tabs
-};
-
-export const AuthProvider = ({ children }: { children: ReactNode }) => {
+export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [hasValidToken, setHasValidToken] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const fetchUser = async () => {
+  const refreshUser = useCallback(async () => {
+    if (!getAccessToken()) {
+      setUser(null);
+      return;
+    }
+
     try {
       const { data } = await api.get("/auth/me");
       setUser(data);
-      setHasValidToken(true);
     } catch {
+      clearAccessToken();
       setUser(null);
-      setHasValidToken(false);
     }
-  };
-
-  const checkAuth = async () => {
-    setIsLoading(true);
-    await fetchUser();
-    setIsLoading(false);
-  };
-
-  const validateToken = async (): Promise<boolean> => {
-    try {
-      await api.get("/auth/me");
-      setHasValidToken(true);
-      return true;
-    } catch {
-      setHasValidToken(false);
-      return false;
-    }
-  };
-
-  const login = async (username: string, password: string) => {
-    const { data } = await api.post("/auth/login", { username, password });
-    setAccessToken(data.accessToken);
-    await fetchUser();
-  };
-
-  useEffect(() => {
-    const handleStorage = (e: StorageEvent) => {
-      if (e.key === "logout") setUser(null);
-    };
-    window.addEventListener("storage", handleStorage);
-    return () => window.removeEventListener("storage", handleStorage);
   }, []);
 
-  const contextValue: AuthContextProps = {
-    user,
-    isLoading,
-    hasValidToken,
-    login,
-    logout,
-    checkAuth,
-    validateToken,
-  };
+  // ✅ Bootstrap ONCE
+  useEffect(() => {
+    (async () => {
+      await refreshUser();
+      setIsLoading(false);
+    })();
+  }, [refreshUser]);
 
-  return <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>;
-};
+  const login = useCallback(async (username: string, password: string) => {
+    const { data } = await api.post("/auth/login", { username, password });
+    setAccessToken(data.accessToken);
+    await refreshUser();
+  }, [refreshUser]);
 
-export const useAuth = () => {
+  const logout = useCallback(() => {
+    clearAccessToken();
+    setUser(null);
+    window.location.href = "/";
+  }, []);
+
+  return (
+    <AuthContext.Provider
+      value={{ user, isLoading, login, logout, refreshUser }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error("useAuth must be used within AuthProvider");
   return ctx;
-};
+}

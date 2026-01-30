@@ -1,64 +1,76 @@
 using System.Diagnostics;
 using backend.Services.Interfaces;
+using backend.OcrModels.Helpers;
 
 namespace backend.Services.ServiceDef;
 
-public class TesseractOcrService : ITesseractOcrService
+public class TesseractOcrService : IOcrService
 {
     private readonly string _tessDataPath;
-    private readonly string _language;
+    private readonly string _defaultLanguage;
 
     public TesseractOcrService(IConfiguration config)
     {
-        // Use the path from appsettings.json
-        _tessDataPath = config["Tesseract:TessdataPath"] 
-                        ?? throw new Exception("TessdataPath not configured");
-        _language = config["Tesseract:Language"] ?? "eng";
+        _tessDataPath = config["Tesseract:TessdataPath"]
+            ?? throw new InvalidOperationException("Tesseract:TessdataPath not configured");
+
+        _defaultLanguage = config["Tesseract:Language"] ?? "eng";
     }
 
-    public async Task<string> ExtractTextAsync(string imagePath)
+    public async Task<string> ExtractTextAsync(string imagePath, string? language)
     {
         if (!File.Exists(imagePath))
             throw new FileNotFoundException("Image file not found.", imagePath);
 
-        string tempOutput = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var lang = OcrLanguage.NormalizeForTesseract(
+            string.IsNullOrWhiteSpace(language)
+                ? _defaultLanguage
+                : language.Trim()
+        );
+
+        var tempOutputBase = Path.Combine(
+            Path.GetTempPath(),
+            Path.GetRandomFileName()
+        );
 
         var startInfo = new ProcessStartInfo
         {
             FileName = "tesseract",
-            Arguments = $"\"{imagePath}\" \"{tempOutput}\" -l {_language}",
+            Arguments = $"\"{imagePath}\" \"{tempOutputBase}\" -l {lang}",
             RedirectStandardError = true,
-            RedirectStandardOutput = true,
             UseShellExecute = false,
-            CreateNoWindow = true,
+            CreateNoWindow = true
         };
 
-        // Use path from appsettings.json
         startInfo.Environment["TESSDATA_PREFIX"] = _tessDataPath;
 
-        using var process = new Process { StartInfo = startInfo };
-        process.Start();
+        using var process = Process.Start(startInfo)
+            ?? throw new Exception("Failed to start tesseract process");
 
-        string stderr = await process.StandardError.ReadToEndAsync();
-        string stdout = await process.StandardOutput.ReadToEndAsync();
+        var stderr = await process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync();
 
         if (process.ExitCode != 0)
-            throw new Exception($"Tesseract failed (ExitCode={process.ExitCode}): {stderr}");
+            throw new Exception($"Tesseract OCR failed: {stderr}");
 
-        string resultFile = tempOutput + ".txt";
+        var resultFile = tempOutputBase + ".txt";
         if (!File.Exists(resultFile))
-            throw new Exception("Tesseract did not produce output file.");
+            throw new Exception("Tesseract did not generate output file.");
 
-        string result = await File.ReadAllTextAsync(resultFile);
-        File.Delete(resultFile);
-
-        return result;
+        try
+        {
+            return await File.ReadAllTextAsync(resultFile);
+        }
+        finally
+        {
+            File.Delete(resultFile);
+        }
     }
 
-    public async Task<string> ExtractTextToFileAsync(string imagePath, string outputFile)
+    public async Task<string> ExtractTextToFileAsync(string imagePath, string outputFile, string? language)
     {
-        var text = await ExtractTextAsync(imagePath);
+        var text = await ExtractTextAsync(imagePath, language);
+        Directory.CreateDirectory(Path.GetDirectoryName(outputFile)!);
         await File.WriteAllTextAsync(outputFile, text);
         return text;
     }

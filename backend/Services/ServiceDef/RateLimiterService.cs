@@ -12,17 +12,10 @@ namespace backend.Services.ServiceDef
         {
             var key = $"{userId}:{action}";
             if (_userActions.TryGetValue(key, out var lastAction))
-            {
-                if ((DateTime.UtcNow - lastAction) > _actionLimit)
-                {
-                    _userActions.TryRemove(key, out _);
-                    return true;
-                }
-                return false;
-            }
+                return (DateTime.UtcNow - lastAction) > _actionLimit;
+
             return true;
         }
-
         public void RecordAction(Guid userId, string action)
         {
             var key = $"{userId}:{action}";

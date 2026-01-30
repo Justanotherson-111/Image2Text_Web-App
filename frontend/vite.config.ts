@@ -1,5 +1,6 @@
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react-swc';
+import { defineConfig } from "vite"
+import react from "@vitejs/plugin-react-swc"
+import path from "path"
 
 export default defineConfig({
   base: "/",
@@ -9,17 +10,18 @@ export default defineConfig({
     emptyOutDir: true,
   },
   resolve: {
-    alias: { "@": "/src" },
+    alias: {
+      "@": path.resolve(__dirname, "src"),
+    },
   },
   server: {
-    https: true,
     port: 5173,
     proxy: {
-      '/api': {
-        target: 'http://localhost:8080',
+      "/api": {
+        target: "http://localhost:8080",
         changeOrigin: true,
         secure: false,
       },
     },
   },
-});
+})

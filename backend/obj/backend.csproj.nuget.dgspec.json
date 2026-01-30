@@ -1,26 +1,25 @@
 {
   "format": 1,
   "restore": {
-    "/mnt/NewVolume/Project/backend/backend.csproj": {}
+    "/mnt/VolumeD/Project/backend/backend.csproj": {}
   },
   "projects": {
-    "/mnt/NewVolume/Project/backend/backend.csproj": {
+    "/mnt/VolumeD/Project/backend/backend.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "/mnt/NewVolume/Project/backend/backend.csproj",
+        "projectUniqueName": "/mnt/VolumeD/Project/backend/backend.csproj",
         "projectName": "backend",
-        "projectPath": "/mnt/NewVolume/Project/backend/backend.csproj",
-        "packagesPath": "/home/phantrison/.nuget/packages/",
-        "outputPath": "/mnt/NewVolume/Project/backend/obj/",
+        "projectPath": "/mnt/VolumeD/Project/backend/backend.csproj",
+        "packagesPath": "/home/phan-tri-son/.nuget/packages/",
+        "outputPath": "/mnt/VolumeD/Project/backend/obj/",
         "projectStyle": "PackageReference",
         "configFilePaths": [
-          "/home/phantrison/.nuget/NuGet/NuGet.Config"
+          "/home/phan-tri-son/.nuget/NuGet/NuGet.Config"
         ],
         "originalTargetFrameworks": [
           "net9.0"
         ],
         "sources": {
-          "/usr/lib/dotnet/library-packs": {},
           "https://api.nuget.org/v3/index.json": {}
         },
         "frameworks": {
@@ -37,7 +36,7 @@
         "restoreAuditProperties": {
           "enableAudit": "true",
           "auditLevel": "low",
-          "auditMode": "direct"
+          "auditMode": "all"
         },
         "SdkAnalysisLevel": "9.0.100"
       },
@@ -48,6 +47,10 @@
             "BCrypt.Net-Next": {
               "target": "Package",
               "version": "[4.0.2, )"
+            },
+            "DocumentFormat.OpenXml": {
+              "target": "Package",
+              "version": "[3.3.0, )"
             },
             "Microsoft.AspNetCore.Authentication.JwtBearer": {
               "target": "Package",
@@ -83,6 +86,10 @@
               "target": "Package",
               "version": "[9.0.1, )"
             },
+            "QuestPDF": {
+              "target": "Package",
+              "version": "[2025.12.3, )"
+            },
             "Swashbuckle.AspNetCore": {
               "target": "Package",
               "version": "[6.7.0, )"
@@ -107,7 +114,7 @@
               "privateAssets": "all"
             }
           },
-          "runtimeIdentifierGraphPath": "/usr/lib/dotnet/sdk/9.0.112/PortableRuntimeIdentifierGraph.json"
+          "runtimeIdentifierGraphPath": "/home/phan-tri-son/.dotnet/sdk/9.0.100/PortableRuntimeIdentifierGraph.json"
         }
       }
     }

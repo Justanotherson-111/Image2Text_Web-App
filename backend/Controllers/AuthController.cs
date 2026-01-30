@@ -3,6 +3,7 @@ using backend.Database;
 using backend.DTOs;
 using backend.Models;
 using backend.Services.Interfaces;
+using backend.Services.ServiceDef;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -16,19 +17,28 @@ public class AuthController : ControllerBase
     private readonly AppDbContext _db;
     private readonly IJwtService _jwt;
     private readonly IConfiguration _config;
+    private readonly IRateLimiterService _rateLimiter;
 
-    public AuthController(AppDbContext db, IJwtService jwt, IConfiguration config)
+    public AuthController(
+        AppDbContext db,
+        IJwtService jwt,
+        IConfiguration config,
+        IRateLimiterService rateLimiter)
     {
         _db = db;
         _jwt = jwt;
         _config = config;
+        _rateLimiter = rateLimiter;
     }
 
     [HttpPost("register")]
     public async Task<IActionResult> Register([FromBody] RegisterDto dto)
     {
+        if (string.IsNullOrWhiteSpace(dto.Password) || dto.Password.Length < 8)
+            return BadRequest(new { error = "Password must be at least 8 characters." });
+
         if (await _db.Users.AnyAsync(u => u.Username == dto.Username || u.Email == dto.Email))
-            return BadRequest("Username or email already in use.");
+            return BadRequest(new { error = "Username or email already in use." });
 
         var user = new User
         {
@@ -40,128 +50,109 @@ public class AuthController : ControllerBase
 
         _db.Users.Add(user);
         await _db.SaveChangesAsync();
-        return Ok(new { message = "User registered successfully." });
+
+        return Ok();
     }
 
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginDto dto)
     {
+        if (!_rateLimiter.CanPerformAction(Guid.Empty, $"login:{dto.Username}"))
+            return StatusCode(429);
+
+        _rateLimiter.RecordAction(Guid.Empty, $"login:{dto.Username}");
+
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Username == dto.Username);
         if (user == null || !BCrypt.Net.BCrypt.Verify(dto.Password, user.PasswordHash))
-            return Unauthorized("Invalid credentials.");
+            return Unauthorized();
 
-        var accessToken = _jwt.GenerateAccessToken(user);
-        var refreshToken = _jwt.GenerateRefreshToken();
-
-        // Store refresh token in DB only
-        _db.RefreshTokens.Add(new RefreshToken
-        {
-            Token = refreshToken,
-            UserId = user.Id,
-            ExpiresAt = DateTime.UtcNow.AddDays(7)
-        });
-        await _db.SaveChangesAsync();
-
-        // Set HttpOnly refresh token cookie
-        var cookieOptions = new CookieOptions
-        {
-            HttpOnly = true,
-            Secure = true, // ensure HTTPS, your nginx uses SSL
-            SameSite = SameSiteMode.None, // if frontend is on different origin; otherwise Lax/Strict as appropriate
-            Expires = DateTime.UtcNow.AddDays(7),
-            Path = "/api/auth/refresh" // restrict path
-        };
-        Response.Cookies.Append("refreshToken", refreshToken, cookieOptions);
-
-        var expiresMinutes = double.Parse(_config["Jwt:AccessTokenMinutes"] ?? "60");
-        return Ok(new AuthResponseDto(accessToken, null, DateTime.UtcNow.AddMinutes(expiresMinutes)));
+        return await IssueTokensAsync(user);
     }
 
     [HttpPost("refresh")]
+    [AllowAnonymous]
     public async Task<IActionResult> Refresh()
     {
-        // read refresh token from cookie
-        if (!Request.Cookies.TryGetValue("refreshToken", out var refreshToken) || string.IsNullOrWhiteSpace(refreshToken))
-            return BadRequest("Refresh token required.");
+        if (!Request.Cookies.TryGetValue("refreshToken", out var rawToken) ||
+            string.IsNullOrWhiteSpace(rawToken))
+            return Unauthorized();
 
-        var token = await _db.RefreshTokens.Include(r => r.User)
-            .FirstOrDefaultAsync(r => r.Token == refreshToken);
+        var tokenHash = JwtService.RefreshTokenHasher.Hash(rawToken);
 
-        if (token == null || token.IsRevoked || token.ExpiresAt < DateTime.UtcNow)
-            return Unauthorized("Invalid refresh token.");
+        await using var tx = await _db.Database.BeginTransactionAsync();
 
-        token.IsRevoked = true; // revoke old refresh token
+        var existing = await _db.RefreshTokens
+            .Include(r => r.User)
+            .FirstOrDefaultAsync(r =>
+                r.Token == tokenHash &&
+                !r.IsRevoked &&
+                r.ExpiresAt > DateTime.UtcNow);
 
-        var newAccess = _jwt.GenerateAccessToken(token.User);
-        var newRefresh = _jwt.GenerateRefreshToken();
+        if (existing == null)
+            return Unauthorized();
 
-        _db.RefreshTokens.Add(new RefreshToken
+        existing.IsRevoked = true;
+
+        var newRawToken = _jwt.GenerateRefreshToken();
+        var newToken = new RefreshToken
         {
-            Token = newRefresh,
-            UserId = token.User.Id,
+            Token = JwtService.RefreshTokenHasher.Hash(newRawToken),
+            UserId = existing.UserId,
             ExpiresAt = DateTime.UtcNow.AddDays(7)
-        });
-
-        // rotate cookie with new refresh token
-        var cookieOptions = new CookieOptions
-        {
-            HttpOnly = true,
-            Secure = true,
-            SameSite = SameSiteMode.None,
-            Expires = DateTime.UtcNow.AddDays(7),
-            Path = "/api/auth/refresh"
         };
-        Response.Cookies.Delete("refreshToken"); // remove old cookie first
-        Response.Cookies.Append("refreshToken", newRefresh, cookieOptions);
 
+        _db.RefreshTokens.Add(newToken);
         await _db.SaveChangesAsync();
+        await tx.CommitAsync();
 
-        var expiresMinutes = double.Parse(_config["Jwt:AccessTokenMinutes"] ?? "60");
-        return Ok(new AuthResponseDto(newAccess, null, DateTime.UtcNow.AddMinutes(expiresMinutes)));
+        SetCookie("refreshToken", newRawToken, 7 * 24 * 60, true);
+
+        var accessToken = _jwt.GenerateAccessToken(existing.User);
+
+        return Ok(new AuthResponseDto(
+            accessToken,
+            null,
+            DateTime.UtcNow.AddMinutes(
+                double.Parse(_config["Jwt:AccessTokenMinutes"]!)
+            )
+        ));
     }
 
     [HttpPost("logout")]
     public async Task<IActionResult> Logout()
     {
-        // read cookie and revoke corresponding DB refresh token if present
-        if (Request.Cookies.TryGetValue("refreshToken", out var refreshToken) && !string.IsNullOrWhiteSpace(refreshToken))
+        if (Request.Cookies.TryGetValue("refreshToken", out var rawToken))
         {
-            var token = await _db.RefreshTokens.FirstOrDefaultAsync(r => r.Token == refreshToken);
+            var tokenHash = JwtService.RefreshTokenHasher.Hash(rawToken);
+
+            var token = await _db.RefreshTokens
+                .FirstOrDefaultAsync(r => r.Token == tokenHash && !r.IsRevoked);
+
             if (token != null)
             {
                 token.IsRevoked = true;
-                _db.RefreshTokens.Update(token);
                 await _db.SaveChangesAsync();
             }
         }
 
-        // delete cookie on client
-        Response.Cookies.Delete("refreshToken", new CookieOptions
-        {
-            HttpOnly = true,
-            Secure = true,
-            SameSite = SameSiteMode.None,
-            Path = "/api/auth/refresh"
-        });
-
+        DeleteAuthCookies();
         return Ok();
     }
+
     [HttpGet("me")]
     [Authorize]
     public async Task<IActionResult> Me()
     {
-        // Extract user ID from JWT claims
-        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (userIdClaim == null) return Unauthorized();
-
-        if (!Guid.TryParse(userIdClaim, out var userId))
+        var id = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(id, out var userId))
             return Unauthorized();
 
         var user = await _db.Users
             .AsNoTracking()
             .FirstOrDefaultAsync(u => u.Id == userId);
 
-        if (user == null) return Unauthorized();
+        if (user == null)
+            return Unauthorized();
 
         return Ok(new
         {
@@ -169,6 +160,53 @@ public class AuthController : ControllerBase
             user.Username,
             user.Email,
             Role = user.UserRole.ToString()
+        });
+    }
+
+    private async Task<IActionResult> IssueTokensAsync(User user)
+    {
+        var accessToken = _jwt.GenerateAccessToken(user);
+        var refreshToken = _jwt.GenerateRefreshToken();
+
+        _db.RefreshTokens.Add(new RefreshToken
+        {
+            Token = JwtService.RefreshTokenHasher.Hash(refreshToken),
+            UserId = user.Id,
+            ExpiresAt = DateTime.UtcNow.AddDays(7)
+        });
+
+        await _db.SaveChangesAsync();
+
+        SetCookie("refreshToken", refreshToken, 7 * 24 * 60, true);
+
+        return Ok(new AuthResponseDto(
+            accessToken,
+            null,
+            DateTime.UtcNow.AddMinutes(
+                double.Parse(_config["Jwt:AccessTokenMinutes"]!)
+            )
+        ));
+    }
+
+    private void SetCookie(string name, string value, int minutes, bool httpOnly)
+    {
+        Response.Cookies.Append(name, value, new CookieOptions
+        {
+            HttpOnly = httpOnly,
+            Secure = true,
+            SameSite = SameSiteMode.None,
+            Expires = DateTime.UtcNow.AddMinutes(minutes),
+            Path = "/"
+        });
+    }
+
+    private void DeleteAuthCookies()
+    {
+        Response.Cookies.Delete("refreshToken", new CookieOptions
+        {
+            Secure = true,
+            SameSite = SameSiteMode.None,
+            Path = "/"
         });
     }
 }

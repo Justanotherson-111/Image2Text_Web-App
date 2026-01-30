@@ -1,28 +1,28 @@
 import { Navigate, Outlet } from "react-router-dom";
 import { useAuth } from "./AuthContext";
-import { useEffect, useState } from "react";
 
 interface ProtectedRouteProps {
   roles?: ("Admin" | "User")[];
 }
 
 export default function ProtectedRoute({ roles }: ProtectedRouteProps) {
-  const { user, checkAuth, isLoading } = useAuth();
-  const [ready, setReady] = useState(false);
+  const { user, isLoading } = useAuth();
 
-  useEffect(() => {
-    const init = async () => {
-      await checkAuth(); // only runs for protected/admin routes
-      setReady(true);
-    };
-    init();
-  }, []);
+  if (isLoading) {
+    return (
+      <div className="h-screen flex items-center justify-center">
+        Loading...
+      </div>
+    );
+  }
 
-  if (!ready || isLoading) return <div>Loading...</div>;
+  if (!user) {
+    return <Navigate to="/" replace />;
+  }
 
-  if (!user) return <Navigate to="/" />; // not logged in
-
-  if (roles && !roles.includes(user.role)) return <Navigate to="/dashboard" />; // role guard
+  if (roles && !roles.includes(user.role)) {
+    return <Navigate to="/dashboard" replace />;
+  }
 
   return <Outlet />;
 }

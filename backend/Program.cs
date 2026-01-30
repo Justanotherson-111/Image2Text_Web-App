@@ -7,9 +7,12 @@ using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
-using System.IdentityModel.Tokens.Jwt;
 using Microsoft.AspNetCore.DataProtection;
 using backend.Hubs;
+using Microsoft.Extensions.FileProviders;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using System.Text.Json.Serialization;
+using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -25,7 +28,11 @@ builder.Services.AddDbContext<AppDbContext>(opts =>
 });
 
 // ========================= CONTROLLERS =======================
-builder.Services.AddControllers();
+builder.Services.AddControllers().AddJsonOptions(opt =>
+{
+    opt.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+    opt.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+});
 
 // ========================= SWAGGER ===========================
 builder.Services.AddEndpointsApiExplorer();
@@ -35,7 +42,12 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddScoped<IImageService, ImageService>();
 builder.Services.AddScoped<IJwtService, JwtService>();
 builder.Services.AddScoped<IRateLimiterService, RateLimiterService>();
-builder.Services.AddScoped<ITesseractOcrService, TesseractOcrService>();
+builder.Services.AddScoped<TesseractOcrService>();
+builder.Services.AddHttpClient<PaddleOcrService>(client =>
+{
+    client.Timeout = TimeSpan.FromMinutes(5);
+});
+builder.Services.AddHttpClient<ICorrector, Corrector>();
 builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
 builder.Services.AddHostedService<OCRBackgroundService>();
 
@@ -58,10 +70,10 @@ builder.Services.AddCors(options =>
 // ========================= AUTHENTICATION =====================
 builder.Services.AddAuthentication(options =>
 {
-    options.DefaultAuthenticateScheme = "Bearer";
-    options.DefaultChallengeScheme = "Bearer";
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
 })
-.AddJwtBearer("Bearer", options =>
+.AddJwtBearer(options =>
 {
     options.TokenValidationParameters = new TokenValidationParameters
     {
@@ -75,12 +87,39 @@ builder.Services.AddAuthentication(options =>
             Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!)
         ),
         ClockSkew = TimeSpan.Zero,
-        NameClaimType = JwtRegisteredClaimNames.Sub,
+        NameClaimType = ClaimTypes.NameIdentifier,
         RoleClaimType = ClaimTypes.Role
     };
+
+    options.Events = new JwtBearerEvents
+    {
+        OnMessageReceived = context =>
+        {
+            // 1️⃣ Authorization header (default)
+            var authHeader = context.Request.Headers["Authorization"].FirstOrDefault();
+            if (!string.IsNullOrEmpty(authHeader) &&
+                authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+            {
+                context.Token = authHeader["Bearer ".Length..];
+                return Task.CompletedTask;
+            }
+
+            // 2️⃣ Optional: access token from cookie
+            if (context.Request.Cookies.TryGetValue("accessToken", out var cookieToken) &&
+                !string.IsNullOrWhiteSpace(cookieToken))
+            {
+                context.Token = cookieToken;
+            }
+
+            return Task.CompletedTask;
+        }
+    };
 });
+
 // =========================== REAL TIME =======================
-builder.Services.AddSignalR();
+builder.Services.AddSignalR(); // currently unused for future updated
+// =========================== PDF LIB =========================
+QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
 
 // ========================= BUILD APP ==========================
 var app = builder.Build();
@@ -114,11 +153,29 @@ app.UseForwardedHeaders(new ForwardedHeadersOptions
 {
     ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
 });
-
 app.UseCors("AllowLocalhost");
 app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
+// ========================== SERVE STATIC FILE ============================
+// Serve uploaded images
+var uploadsPath = Path.Combine(Directory.GetCurrentDirectory(), "Uploads");
+Directory.CreateDirectory(uploadsPath);
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new PhysicalFileProvider(uploadsPath),
+    RequestPath = "/uploads"
+});
+
+// Serve extracted text files
+var textPath = Path.Combine(Directory.GetCurrentDirectory(), "ExtractedText");
+Directory.CreateDirectory(textPath);
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new PhysicalFileProvider(textPath),
+    RequestPath = "/extracted-text"
+});
+
 
 app.MapControllers();
 app.MapHub<OcrHub>("/api/hubs/ocr");

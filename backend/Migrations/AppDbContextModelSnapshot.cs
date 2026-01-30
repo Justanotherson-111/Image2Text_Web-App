@@ -22,6 +22,54 @@ namespace backend.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("backend.Models.Document", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedById");
+
+                    b.ToTable("Documents");
+                });
+
+            modelBuilder.Entity("backend.Models.DocumentSection", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("DocumentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("OrderIndex")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Title")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DocumentId");
+
+                    b.ToTable("DocumentSections");
+                });
+
             modelBuilder.Entity("backend.Models.Image", b =>
                 {
                     b.Property<Guid>("Id")
@@ -39,6 +87,9 @@ namespace backend.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<Guid>("SectionId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("UploadedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -46,6 +97,8 @@ namespace backend.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("SectionId");
 
                     b.HasIndex("UploadedById");
 
@@ -58,20 +111,29 @@ namespace backend.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<bool>("Completed")
-                        .HasColumnType("boolean");
-
                     b.Property<DateTime?>("CompletedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
+                    b.Property<string>("ErrorCode")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("text");
 
                     b.Property<Guid>("ImageId")
                         .HasColumnType("uuid");
 
-                    b.Property<string>("ResultPath")
+                    b.Property<string>("Language")
                         .HasColumnType("text");
+
+                    b.Property<int>("Progress")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
 
                     b.HasKey("Id");
 
@@ -119,12 +181,18 @@ namespace backend.Migrations
                     b.Property<Guid?>("CreatedById")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTime?>("EditedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("FileName")
                         .IsRequired()
                         .HasColumnType("text");
 
                     b.Property<Guid>("ImageId")
                         .HasColumnType("uuid");
+
+                    b.Property<bool>("IsManuallyEdited")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("Path")
                         .IsRequired()
@@ -171,12 +239,42 @@ namespace backend.Migrations
                     b.ToTable("Users");
                 });
 
+            modelBuilder.Entity("backend.Models.Document", b =>
+                {
+                    b.HasOne("backend.Models.User", "CreatedBy")
+                        .WithMany()
+                        .HasForeignKey("CreatedById")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("CreatedBy");
+                });
+
+            modelBuilder.Entity("backend.Models.DocumentSection", b =>
+                {
+                    b.HasOne("backend.Models.Document", "Document")
+                        .WithMany("Sections")
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Document");
+                });
+
             modelBuilder.Entity("backend.Models.Image", b =>
                 {
+                    b.HasOne("backend.Models.DocumentSection", "Section")
+                        .WithMany("Images")
+                        .HasForeignKey("SectionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
                     b.HasOne("backend.Models.User", "UploadedBy")
                         .WithMany("Images")
                         .HasForeignKey("UploadedById")
                         .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Section");
 
                     b.Navigation("UploadedBy");
                 });
@@ -219,6 +317,16 @@ namespace backend.Migrations
                     b.Navigation("CreatedBy");
 
                     b.Navigation("Image");
+                });
+
+            modelBuilder.Entity("backend.Models.Document", b =>
+                {
+                    b.Navigation("Sections");
+                });
+
+            modelBuilder.Entity("backend.Models.DocumentSection", b =>
+                {
+                    b.Navigation("Images");
                 });
 
             modelBuilder.Entity("backend.Models.Image", b =>

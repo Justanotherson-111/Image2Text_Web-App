@@ -16,5 +16,8 @@ namespace backend.Models
         public bool OcrProcessed { get; set; } = false;
         public OcrJob OcrJob { get; set; }
         public List<TextFile> TextFiles { get; set; } = new();
+        [Required]
+        public Guid SectionId { get; set; }
+        public DocumentSection Section { get; set; } = null!;
     }
 }

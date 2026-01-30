@@ -16,43 +16,45 @@ public class ImageService : IImageService
         _logger = logger;
         _dbContext = db;
         _uploadsDir = config["Storage:ImagesPath"] ?? "/app/Uploads";
-        if (!Directory.Exists(_uploadsDir)) Directory.CreateDirectory(_uploadsDir);
+
+        if (!Directory.Exists(_uploadsDir))
+            Directory.CreateDirectory(_uploadsDir);
     }
 
-    public async Task<Image> SaveImageAsync(Stream stream, string fileName, Guid? uploadedById = null)
+    /// <summary>
+    /// Save an uploaded image and link it to a DocumentSection
+    /// </summary>
+    public async Task<Image> SaveImageAsync(Stream stream, string fileName, Guid sectionId, Guid? uploadedById = null)
     {
+        // Check if section exists
+        var section = await _dbContext.DocumentSections
+            .Include(s => s.Document)
+            .FirstOrDefaultAsync(s => s.Id == sectionId);
+
+        if (section == null)
+            throw new ArgumentException("Section not found", nameof(sectionId));
+
+        // Save file to disk
         var saveName = $"{Guid.NewGuid()}_{fileName}";
         var path = Path.Combine(_uploadsDir, saveName);
+
         await using var fs = File.Create(path);
         await stream.CopyToAsync(fs);
 
-        var image = new Image { FileName = fileName, Path = path, UploadedById = uploadedById };
+        // Create DB record
+        var image = new Image
+        {
+            FileName = fileName,
+            Path = path,
+            UploadedById = uploadedById,
+            SectionId = sectionId,
+            UploadedAt = DateTime.UtcNow,
+            OcrProcessed = false
+        };
+
         _dbContext.Images.Add(image);
         await _dbContext.SaveChangesAsync();
+
         return image;
-    }
-
-    public async Task<bool> DeleteImageAsync(Guid id)
-    {
-        var image = await _dbContext.Images
-            .Include(i => i.OcrJob)
-            .Include(i => i.TextFiles)
-            .FirstOrDefaultAsync(i => i.Id == id);
-
-        if (image == null) return false;
-        if (!File.Exists(image.Path))
-            _logger.LogWarning("File {Path} not found on disk.", image.Path);
-
-        if (image.OcrJob?.ResultPath != null && File.Exists(image.OcrJob.ResultPath))
-            File.Delete(image.OcrJob.ResultPath);
-
-        foreach (var tf in image.TextFiles ?? Enumerable.Empty<TextFile>())
-            if (File.Exists(tf.Path)) File.Delete(tf.Path);
-
-        if (File.Exists(image.Path)) File.Delete(image.Path);
-
-        _dbContext.Images.Remove(image);
-        await _dbContext.SaveChangesAsync();
-        return true;
     }
 }

@@ -20,6 +20,9 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     tesseract-ocr \
     tesseract-ocr-eng \
+    tesseract-ocr-vie \
+    tesseract-ocr-jpn \
+    tesseract-ocr-kor \
     curl \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*

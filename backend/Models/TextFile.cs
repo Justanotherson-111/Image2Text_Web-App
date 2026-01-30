@@ -14,5 +14,8 @@ namespace backend.Models
         public Guid? CreatedById { get; set; }
         public User CreatedBy { get; set; }
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+        public bool IsManuallyEdited { get; set; } = false;
+        public DateTime? EditedAt { get; set; }
     }
 }

@@ -7,14 +7,21 @@ public class BackgroundTaskQueue : IBackgroundTaskQueue
 {
     private readonly Channel<Func<Task>> _queue;
 
-    public BackgroundTaskQueue() => _queue = Channel.CreateUnbounded<Func<Task>>();
+    public BackgroundTaskQueue()
+    {
+        _queue = Channel.CreateBounded<Func<Task>>(new BoundedChannelOptions(100)
+        {
+            FullMode = BoundedChannelFullMode.Wait
+        });
+    }
 
-    public void Enqueue(Func<Task> workItem)
+    public async Task Enqueue(Func<Task> workItem)
     {
         if (workItem == null) throw new ArgumentNullException(nameof(workItem));
-        _queue.Writer.TryWrite(workItem);
+        await _queue.Writer.WriteAsync(workItem);
     }
 
     public async Task<Func<Task>> DequeueAsync(CancellationToken cancellationToken)
         => await _queue.Reader.ReadAsync(cancellationToken);
 }
+
