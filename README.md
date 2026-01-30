@@ -80,7 +80,7 @@ mkcert
 Git
 
 ---
-## 🔐 HTTPS Setup (Required)
+### 🔐 HTTPS Setup (Required)
 
 This project uses mkcert for local HTTPS.
 
@@ -115,8 +115,8 @@ frontend/certs/
 ```
 
 Or just rent server......
-
-## 🐳 Docker Setup
+---
+### 🐳 Docker Setup
 1️⃣ Clone repository
 ```
 git clone https://github.com/Justanotherson-111/Image2Text_Web-App.git
@@ -157,7 +157,7 @@ PaddleOCR
 
 Text Corrector service
 ```
-### 👤 Default Admin Account
+👤 Default Admin Account
 
 On first startup, the backend automatically seeds an admin account:
 
@@ -167,7 +167,7 @@ Password: ADMIN_PASSWORD (from environment variable)
 
 ⚠️ Change this password immediately in production.
 
-### 🔑 Authentication
+🔑 Authentication
 
 JWT Bearer authentication
 
@@ -189,7 +189,7 @@ Signing key
 
 Zero clock skew
 
-### 📦 Static Files
+📦 Static Files
 
 The backend serves:
 
@@ -198,7 +198,7 @@ Uploaded images → /uploads
 Extracted text files → /extracted-text
 
 These directories are mounted as Docker volumes.
-
+---
 ## ☁️ Cloud Deployment (Optional) ==> Recommened for production purpose
 *** This is demo version so in order to production-ready, we need to improve the system a lot. 
 
