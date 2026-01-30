@@ -80,7 +80,7 @@ mkcert
 Git
 
 ---
-### 🔐 HTTPS Setup (Required)
+### 🔐 HTTPS Setup (Required) Or just rent server......
 
 This project uses mkcert for local HTTPS.
 
@@ -113,8 +113,6 @@ frontend/certs/
 ├── localhost.pem
 └── localhost-key.pem
 ```
-
-Or just rent server......
 ---
 ### 🐳 Docker Setup
 1️⃣ Clone repository
